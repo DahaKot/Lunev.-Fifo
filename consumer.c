@@ -33,15 +33,13 @@ do {                                                            \
     if (write(croud_fifo_fd, page_buff, PAGE_SIZE)              \
             == PAGE_SIZE) {                                     \
         have_pair = 1;                                          \
+        /*if successful: do not wait with sleep*/               \
+        data_fifo_fd = open("data_fifo", O_RDONLY);             \
     }                                                           \
     if (!have_pair) {                                           \
         /*if not successful: wait until croud_fifo*/            \
         /*is available or time_exceeded*/                       \
         close(croud_fifo_fd);                                   \
-    }                                                           \
-    else {                                                      \
-        /*if successful: do not wait with sleep*/               \
-        continue;                                               \
     }                                                           \
 } while(0)
 
@@ -67,12 +65,9 @@ int main(int argc, char **argv) {
     MKFIFO("consume_fifo");
     MKFIFO("data_fifo");
 
-    int producer_fifo_fd = open("produce_fifo", O_RDWR | O_NONBLOCK);
-    int consumer_fifo_fd = open("consume_fifo", O_RDWR | O_NONBLOCK);
-    int data_fifo_fd     = open("data_fifo", O_RDONLY);
-
     char have_pair = 1;
     int read_s = 0;
+    int data_fifo_fd = 0;
 
     //open croud_fifo -> change its size -> if it's full: wait
     int croud_fifo_fd = open("croud_fifo3", O_RDWR | O_NONBLOCK);
@@ -80,29 +75,32 @@ int main(int argc, char **argv) {
 
     if (write(croud_fifo_fd, page_buff, PAGE_SIZE) != PAGE_SIZE) {
         have_pair = 0;
-    }
-    if (!have_pair) {
         close(croud_fifo_fd);
     }
 
-    while(1) {
-        if (have_pair && read(consumer_fifo_fd, buff, read_n) > 0) {
-            sleep_time = 1;
+    int producer_fifo_fd = open("produce_fifo", O_RDWR);
+    fcntl(producer_fifo_fd, F_SETPIPE_SZ, PAGE_SIZE);
+    write(producer_fifo_fd, page_buff, PAGE_SIZE);
 
+    int consumer_fifo_fd = open("consume_fifo", O_RDONLY);
+    fcntl(consumer_fifo_fd, F_SETPIPE_SZ, PAGE_SIZE);
+    read(consumer_fifo_fd, page_buff, PAGE_SIZE);
+
+    if (have_pair) {
+        data_fifo_fd = open("data_fifo", O_RDONLY);
+    }
+
+    while(1) {
+        if (have_pair) {
             read_s = read(data_fifo_fd, buff, buff_size);
 
-            //allow producer to work
-            write(producer_fifo_fd, PRODUCER, read_n);
-
             write(STDOUT_FILENO, buff, read_s);
-            if (buff[buff_size - 1] == EOF) {
+            if (buff[buff_size - 1] == EOF || read_s == 0) {
                 break;
             }
         }
         else {
-            if (!have_pair) {
-                SET_HAVE_PAIR;
-            }
+            SET_HAVE_PAIR;
 
             sleep(sleep_time);
             sleep_time <<= 1;

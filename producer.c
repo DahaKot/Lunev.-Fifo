@@ -35,15 +35,13 @@ do {                                                            \
     if (write(croud_fifo_fd, page_buff, PAGE_SIZE)              \
             == PAGE_SIZE) {                                     \
         have_pair = 1;                                          \
+        /*if successful: do not wait with sleep*/               \
+        data_fifo_fd = open("data_fifo", O_WRONLY);             \
     }                                                           \
     if (!have_pair) {                                           \
         /*if not successful: wait until croud_fifo*/            \
         /*is available or time_exceeded*/                       \
         close(croud_fifo_fd);                                   \
-    }                                                           \
-    else {                                                      \
-        /*if successful: do not wait with sleep*/               \
-        continue;                                               \
     }                                                           \
 } while(0)
 
@@ -60,8 +58,6 @@ int main(int argc, char **argv) {
 
     char *buff __attribute__((cleanup(freee)))
         = calloc(buff_size, sizeof(char));
-    char *fifo_buff __attribute__((cleanup(freee)))
-        = calloc(buff_size, sizeof(char));
     char *page_buff __attribute__((cleanup(freee)))
         = calloc(PAGE_SIZE, sizeof(char));
 
@@ -71,14 +67,16 @@ int main(int argc, char **argv) {
     MKFIFO("consume_fifo");
     MKFIFO("data_fifo");
 
-    int producer_fifo_fd = open("produce_fifo", O_RDWR | O_NONBLOCK);
-    int consumer_fifo_fd = open("consume_fifo", O_RDWR | O_NONBLOCK);
-    int data_fifo_fd     = open("data_fifo", O_WRONLY);
-    int input_fd         = open(argv[1], O_RDONLY);
+    int input_fd = open(argv[1], O_RDONLY);
+    if (input_fd == -1) {
+        printf("Cannot open the file\n");
+        return 0;
+    }
     lseek(input_fd, 0, SEEK_SET);
 
     char have_pair = 1;
     int read_s = 0;
+    int data_fifo_fd = 0;
 
     //open croud_fifo -> change its size -> if it's full: wait
     int croud_fifo_fd = open("croud_fifo2", O_RDWR | O_NONBLOCK);
@@ -86,29 +84,30 @@ int main(int argc, char **argv) {
 
     if (write(croud_fifo_fd, page_buff, PAGE_SIZE) != PAGE_SIZE) {
         have_pair = 0;
-    }
-
-    if (have_pair) {
-        //initial signal for producer to start
-        write(producer_fifo_fd, PRODUCER, read_n);
-    }
-    else {
         close(croud_fifo_fd);
     }
 
+    //
+    int consumer_fifo_fd = open("consume_fifo", O_RDWR);
+    fcntl(consumer_fifo_fd, F_SETPIPE_SZ, PAGE_SIZE);
+    write(consumer_fifo_fd, page_buff, PAGE_SIZE);
+
+    int producer_fifo_fd = open("produce_fifo", O_RDONLY);
+    fcntl(producer_fifo_fd, F_SETPIPE_SZ, PAGE_SIZE);
+    read(producer_fifo_fd, page_buff, PAGE_SIZE);
+
+    if (have_pair) {
+        data_fifo_fd = open("data_fifo", O_WRONLY);
+    }
+
     while(1) {
-        if (have_pair && read(producer_fifo_fd, fifo_buff, read_n) > 0) {
+        if (have_pair) {
             read_s = read(input_fd, buff, buff_size);
             if (read_s < buff_size) {
                 clear_rest(read_s, buff);
             }
 
-            sleep_time = 1;
-
             write(data_fifo_fd, buff, buff_size);
-
-            //allow consumer to work
-            write(consumer_fifo_fd, CONSUMER, read_n);
 
             if (read_s < buff_size) {
                 //EOF is reached
@@ -116,9 +115,7 @@ int main(int argc, char **argv) {
             }
         }
         else {
-            if (!have_pair) {
-                SET_HAVE_PAIR;
-            }
+            SET_HAVE_PAIR;
 
             sleep(sleep_time);
             sleep_time <<= 1;
