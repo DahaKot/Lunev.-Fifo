@@ -8,10 +8,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-char  CONSUMER_TURN     = '0';
-const char PRODUCER[]   = "1";
-unsigned sleep_time     = 1;
-unsigned MAX_SLEEP_TIME = 255;
+unsigned sleep_time     = 512;
+unsigned MAX_SLEEP_TIME = 1024 * 1024 * 2;
 
 void freee(void *ptr) {
     free(*(void **)ptr);
@@ -33,7 +31,7 @@ do {                                                            \
     if (write(croud_fifo_fd, page_buff, PAGE_SIZE)              \
             == PAGE_SIZE) {                                     \
         have_pair = 1;                                          \
-        /*if successful: do not wait with sleep*/               \
+        /*if successful: open data_fifo*/                       \
         data_fifo_fd = open("data_fifo", O_RDONLY);             \
     }                                                           \
     if (!have_pair) {                                           \
@@ -43,8 +41,8 @@ do {                                                            \
     }                                                           \
 } while(0)
 
-size_t buff_size = 1024;
-int    read_n    = 2;
+const size_t buff_size = 1024;
+const int    read_n    = 2;
 
 int main(int argc, char **argv) {
     if (argv == NULL || argc != 1) {
@@ -54,10 +52,8 @@ int main(int argc, char **argv) {
 
     size_t PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
 
-    char *buff __attribute__((cleanup(freee)))
-        = calloc(buff_size, sizeof(char));
-    char *page_buff __attribute__((cleanup(freee)))
-        = calloc(PAGE_SIZE, sizeof(char));
+    char *buff[buff_size];
+    char *page_buff[PAGE_SIZE];
 
     errno = 0;
     MKFIFO("croud_fifo3");
@@ -76,6 +72,7 @@ int main(int argc, char **argv) {
     if (write(croud_fifo_fd, page_buff, PAGE_SIZE) != PAGE_SIZE) {
         have_pair = 0;
         close(croud_fifo_fd);
+        //return 0;
     }
 
     int producer_fifo_fd = open("produce_fifo", O_RDWR);
@@ -95,14 +92,15 @@ int main(int argc, char **argv) {
             read_s = read(data_fifo_fd, buff, buff_size);
 
             write(STDOUT_FILENO, buff, read_s);
-            if (buff[buff_size - 1] == EOF || read_s == 0) {
+
+            if (read_s < buff_size) {
                 break;
             }
         }
         else {
             SET_HAVE_PAIR;
 
-            sleep(sleep_time);
+            usleep(sleep_time);
             sleep_time <<= 1;
             if (sleep_time > MAX_SLEEP_TIME) {
                 printf("I was waiting too long\n");
