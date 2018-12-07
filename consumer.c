@@ -8,13 +8,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-unsigned sleep_time     = 512;
-unsigned MAX_SLEEP_TIME = 1024 * 1024 * 2;
-
-void freee(void *ptr) {
-    free(*(void **)ptr);
-}
-
 #define MKFIFO(name)                                            \
 do {                                                            \
     if (mkfifo(name, 0644) != 0 && errno != EEXIST) {           \
@@ -23,26 +16,7 @@ do {                                                            \
     }                                                           \
 } while(0)
 
-//try to capture croud_fifo
-#define SET_HAVE_PAIR                                           \
-do {                                                            \
-    croud_fifo_fd = open("croud_fifo3", O_RDWR | O_NONBLOCK);   \
-    fcntl(croud_fifo_fd, F_SETPIPE_SZ, PAGE_SIZE);              \
-    if (write(croud_fifo_fd, page_buff, PAGE_SIZE)              \
-            == PAGE_SIZE) {                                     \
-        have_pair = 1;                                          \
-        /*if successful: open data_fifo*/                       \
-        data_fifo_fd = open("data_fifo", O_RDONLY);             \
-    }                                                           \
-    if (!have_pair) {                                           \
-        /*if not successful: wait until croud_fifo*/            \
-        /*is available or time_exceeded*/                       \
-        close(croud_fifo_fd);                                   \
-    }                                                           \
-} while(0)
-
-const size_t buff_size = 1024;
-const int    read_n    = 2;
+const size_t buff_size  = 1024;
 
 int main(int argc, char **argv) {
     if (argv == NULL || argc != 1) {
@@ -57,11 +31,8 @@ int main(int argc, char **argv) {
 
     errno = 0;
     MKFIFO("croud_fifo3");
-    MKFIFO("produce_fifo");
-    MKFIFO("consume_fifo");
     MKFIFO("data_fifo");
 
-    char have_pair = 1;
     int read_s = 0;
     int data_fifo_fd = 0;
 
@@ -70,49 +41,20 @@ int main(int argc, char **argv) {
     fcntl(croud_fifo_fd, F_SETPIPE_SZ, PAGE_SIZE);
 
     if (write(croud_fifo_fd, page_buff, PAGE_SIZE) != PAGE_SIZE) {
-        have_pair = 0;
-        close(croud_fifo_fd);
-        //return 0;
+        return 0;
     }
 
-    int producer_fifo_fd = open("produce_fifo", O_RDWR);
-    fcntl(producer_fifo_fd, F_SETPIPE_SZ, PAGE_SIZE);
-    write(producer_fifo_fd, page_buff, PAGE_SIZE);
-
-    int consumer_fifo_fd = open("consume_fifo", O_RDONLY);
-    fcntl(consumer_fifo_fd, F_SETPIPE_SZ, PAGE_SIZE);
-    read(consumer_fifo_fd, page_buff, PAGE_SIZE);
-
-    if (have_pair) {
-        data_fifo_fd = open("data_fifo", O_RDONLY);
-    }
+    data_fifo_fd = open("data_fifo", O_RDONLY);
 
     while(1) {
-        if (have_pair) {
-            read_s = read(data_fifo_fd, buff, buff_size);
+        read_s = read(data_fifo_fd, buff, buff_size);
 
-            write(STDOUT_FILENO, buff, read_s);
+        write(STDOUT_FILENO, buff, read_s);
 
-            if (read_s < buff_size) {
-                break;
-            }
-        }
-        else {
-            SET_HAVE_PAIR;
-
-            usleep(sleep_time);
-            sleep_time <<= 1;
-            if (sleep_time > MAX_SLEEP_TIME) {
-                printf("I was waiting too long\n");
-                break;
-            }
+        if (read_s < buff_size) {
+            break;
         }
     }
-
-    close(croud_fifo_fd);
-    close(producer_fifo_fd);
-    close(consumer_fifo_fd);
-    close(data_fifo_fd);
 
     return 0;
 }
